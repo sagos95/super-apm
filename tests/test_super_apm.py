@@ -73,7 +73,7 @@ raise SystemExit(int(os.environ.get("FAKE_APM_EXIT", "0")))
         self.assertEqual(app.main(["install"]), 0)
         calls = self.native_calls()
         self.assertEqual([Path(c["cwd"]) for c in calls], [self.root, self.root / app.LOCAL])
-        self.assertEqual(calls[1]["args"][-3:], ["--only", "apm", "--no-trust-bin"])
+        self.assertEqual(calls[1]["args"][-1:], ["--no-trust-bin"])
 
     def test_local_add_does_not_write_shared_manifest(self):
         self.manifest(packages=("team/shared",))

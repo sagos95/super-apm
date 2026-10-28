@@ -14,11 +14,15 @@ from urllib.parse import urlsplit
 
 import yaml
 
+import super_apm_mcp as mcp
+import super_apm_hooks as hooks
+import contextlib
+
 LOCAL = ".apm-local"
 RECEIPT = "super-apm-links.json"
 START = "# BEGIN super-apm local (managed)"
 END = "# END super-apm local (managed)"
-HELP = """super-apm — shared + local APM skills
+HELP = """super-apm — shared + local APM skills and MCP servers
 
   super-apm install                  Install both configured scopes
   super-apm install PACKAGE          Add a shared dependency
@@ -28,11 +32,14 @@ HELP = """super-apm — shared + local APM skills
   super-apm audit                    Audit both installations
   super-apm sync                     Reconcile local skill links and .gitignore
   super-apm status                   Show scopes and local link health
+  super-apm hooks install            Install Claude/Codex session hooks
+      --shared-policy daily|pinned   Shared updates daily, or preserve pins
+      --global-updates              Also update global APM daily
+      --pre-shared SCRIPT.py        Run a project script before shared install
   super-apm migrate-local            Move the legacy .git/apm-personal installation
 
 Use --shared or --local to select one scope. Native APM options are forwarded.
-Local scope supports skills for Claude and Codex; MCP/config/hook merging is not
-implemented. APM keeps separate manifests and lockfiles. No Git commit or push.
+Local scope supports Claude/Codex skills and project-local MCP servers. APM keeps separate manifests and lockfiles. No Git commit or push.
 """
 
 
@@ -84,11 +91,12 @@ def owned_link(path: Path, target: Path) -> bool:
 
 
 def update_ignore(root: Path, paths: list[str]) -> None:
+    paths = [*paths, *mcp.private_paths(root)]
     path = root / ".gitignore"
     source = path.read_text() if path.exists() else ""
     if source.count(START) != source.count(END) or source.count(START) > 1:
         raise Error("Malformed super-apm block in .gitignore")
-    block = START + "\n" + "\n".join(sorted({f"/{LOCAL}/", "/.apm-local-stage-*/", *('/' + p for p in paths)})) + "\n" + END
+    block = START + "\n" + "\n".join(sorted({f"/{LOCAL}/", "/.apm-local-stage-*/", "/.super-apm-operation.lock", *('/' + p for p in paths)})) + "\n" + END
     if START in source:
         start = source.index(START)
         finish = source.index(END, start) + len(END)
@@ -114,8 +122,8 @@ def shared_names(root: Path) -> set[str]:
 def local_sources(root: Path) -> dict[str, Path]:
     local = root / LOCAL
     manifest = read_yaml(local / "apm.yml")
-    if any(manifest.get("dependencies", {}).get(kind) for kind in ("mcp", "lsp")):
-        raise Error("Local scope currently supports skills; MCP/LSP configuration merging is not implemented")
+    if manifest.get("dependencies", {}).get("lsp"):
+        raise Error("Local LSP configuration merging is not implemented")
     result = {}
     for client in (".agents", ".claude"):
         folder = local / client / "skills"
@@ -131,8 +139,8 @@ def local_sources(root: Path) -> dict[str, Path]:
     for client in (".agents", ".claude", ".codex"):
         folder = local / client
         for item in folder.iterdir() if folder.is_dir() else []:
-            if item.name != "skills":
-                raise Error(f"Unsupported local APM output: {client}/{item.name}; only skills are exposed")
+            if item.name != "skills" and not (client == ".codex" and item.name == "config.toml"):
+                raise Error(f"Unsupported local APM output: {client}/{item.name}; only skills and MCP are exposed")
     return result
 
 
@@ -165,6 +173,7 @@ def sync(root: Path, allow_shared_conflicts: bool = False) -> int:
         return 0
     if local.is_symlink() or tracked(root, local):
         raise Error("The local installation must be an untracked real directory")
+    os.chmod(local, 0o700)
     desired = local_sources(root)
     previous = receipt(root)
     reserved = shared_names(root)
@@ -180,7 +189,8 @@ def sync(root: Path, allow_shared_conflicts: bool = False) -> int:
         if path.exists() or path.is_symlink():
             if name not in previous or not owned_link(path, root / previous[name]):
                 raise Error(f"An existing file or foreign link conflicts with local scope: {name}")
-    update_ignore(root, sorted(desired))
+    mcp_plan = mcp.prepare(root)
+    update_ignore(root, sorted(desired) + mcp_plan[2])
     for name, old_target in previous.items():
         path = root / name
         if name not in desired and path.is_symlink():
@@ -195,7 +205,8 @@ def sync(root: Path, allow_shared_conflicts: bool = False) -> int:
     path = local / RECEIPT
     if not path.exists() or path.read_text() != content:
         path.write_text(content)
-    print(f"[super-apm] local: {len(desired)} skill links reconciled", flush=True)
+    mcp_count = mcp.apply(root, mcp_plan, trash)
+    print(f"[super-apm] local: {len(desired)} skill links, {mcp_count} MCP entries reconciled", flush=True)
     return len(desired)
 
 
@@ -204,6 +215,8 @@ def init_local(root: Path) -> None:
     if tracked(root, local) or local.is_symlink():
         raise Error("The local installation must be an untracked real directory")
     local.mkdir(exist_ok=True)
+    (local / ".claude").mkdir(exist_ok=True)
+    (local / ".codex").mkdir(exist_ok=True)
     update_ignore(root, list(receipt(root)))
     path = local / "apm.yml"
     if not path.exists():
@@ -214,8 +227,8 @@ def native(root: Path, scope: str, args: list[str]) -> int:
     cwd = root if scope == "shared" else root / LOCAL
     if scope == "local":
         local_sources(root)
-        if "--mcp" in args or "--legacy-skill-paths" in args:
-            raise Error("Local scope exposes Claude/Codex skills only")
+        if "--legacy-skill-paths" in args:
+            raise Error("Local scope requires standard skill paths")
         for index, arg in enumerate(args):
             if arg in {"--target", "-t", "--runtime"} and index + 1 < len(args):
                 if not set(args[index + 1].split(",")) <= {"claude", "codex"}:
@@ -230,7 +243,7 @@ def native(root: Path, scope: str, args: list[str]) -> int:
         if args[0] not in {"install", "update", "uninstall", "deps", "audit", "outdated", "view"}:
             raise Error(f"Local scope does not support '{args[0]}' in this version")
         if args[0] == "install":
-            args = [*args, "--only", "apm", "--no-trust-bin"]
+            args = [*args, "--no-trust-bin"]
         if args[0] == "uninstall" and "--dry-run" not in args:
             # Preserve the actual old installation in Trash before APM removes files.
             staging = root / f".apm-local-stage-{uuid.uuid4().hex}"
@@ -240,8 +253,20 @@ def native(root: Path, scope: str, args: list[str]) -> int:
     executable = os.environ.get("SUPER_APM_EXECUTABLE") or shutil.which("apm")
     if not executable:
         raise Error("APM is not installed or not on PATH")
-    print(f"[super-apm] {scope}: apm {' '.join(args)}", flush=True)
-    return subprocess.run([executable, *args], cwd=cwd).returncode
+    print(f"[super-apm] {scope}: apm {args[0]}", flush=True)
+    quiet = os.environ.get("SUPER_APM_QUIET") == "1"
+    output = subprocess.DEVNULL if quiet else None
+    detached = False
+    if scope == "shared" and mcp.state(root) and "--dry-run" not in args:
+        mcp.apply(root, mcp.prepare(root, expose=False), trash)
+        detached = True
+    try:
+        return subprocess.run([executable, *args], cwd=cwd, stdout=output, stderr=output).returncode
+    finally:
+        if detached:
+            plan = mcp.prepare(root)
+            update_ignore(root, list(receipt(root)) + plan[2])
+            mcp.apply(root, plan, trash)
 
 
 def identities(root: Path) -> set[str]:
@@ -350,8 +375,12 @@ def main(argv: list[str] | None = None) -> int:
     if not args or args == ["--help"] or args == ["-h"]:
         print(HELP)
         return 0
+    if args and args[0] == "hook-worker":
+        return hooks.worker(args[1:])
+    if args and args[0] == "mcp-run":
+        return mcp.run_stdio(args[1:])
     if args == ["--version"]:
-        print("super-apm 0.1.0")
+        print("super-apm 0.2.0")
         return 0
     try:
         selected = [flag[2:] for flag in ("--local", "--shared") if flag in args]
@@ -371,6 +400,14 @@ def main(argv: list[str] | None = None) -> int:
             return subprocess.run([executable, *args]).returncode
         root = project_root(Path.cwd())
         command = args[0]
+        if command == "hook":
+            return hooks.entry(root, args[1:])
+        if command == "hooks":
+            if len(args) < 2 or args[1] != "install":
+                raise Error("Use hooks install --shared-policy daily|pinned")
+            options = hooks.parse_policy(args[2:])
+            hooks.install(root, options.shared_policy, options.global_updates, options.pre_shared)
+            return 0
         if command == "migrate-local":
             migrate(root)
             return 0
@@ -383,6 +420,9 @@ def main(argv: list[str] | None = None) -> int:
             desired = local_sources(root)
             healthy = sum(owned_link(root / name, path) and (root / name / "SKILL.md").is_file() for name, path in desired.items())
             print(f"local links: {healthy}/{len(desired)} healthy")
+            hook_state = hooks.read_json(root / LOCAL / hooks.STATE)
+            if hook_state:
+                print(f"background refresh: {hook_state.get('status', 'unknown')}")
             return 0 if healthy == len(desired) else 1
         if command == "list":
             if len(args) != 1:
@@ -421,24 +461,26 @@ def main(argv: list[str] | None = None) -> int:
             scopes = ["shared"]
         if not scopes:
             raise Error("No APM manifest; use install PACKAGE or install PACKAGE --local")
-        if mutating and (root / LOCAL / "apm.yml").exists():
-            sync(root, allow_shared_conflicts=command == "uninstall")
-        code = 0
-        for scope in scopes:
-            scoped = args
-            if command in {"update", "uninstall"} and packages and not selected:
-                scoped = [a for a in args if a not in packages or routed[a] == scope]
-            result = native(root, scope, scoped)
-            code = code or result
-            if result:
-                if mutating:
-                    break
-                continue
+        lock = hooks.operation_lock(root) if mutating or mcp.state(root) else contextlib.nullcontext()
+        with lock:
             if mutating and (root / LOCAL / "apm.yml").exists():
-                sync(root)
-        return code
-    except (Error, OSError, subprocess.CalledProcessError) as exc:
-        message = str(exc) if isinstance(exc, Error) else type(exc).__name__
+                sync(root, allow_shared_conflicts=command == "uninstall")
+            code = 0
+            for scope in scopes:
+                scoped = args
+                if command in {"update", "uninstall"} and packages and not selected:
+                    scoped = [a for a in args if a not in packages or routed[a] == scope]
+                result = native(root, scope, scoped)
+                code = code or result
+                if result:
+                    if mutating:
+                        break
+                    continue
+                if mutating and (root / LOCAL / "apm.yml").exists():
+                    sync(root)
+            return code
+    except (Error, mcp.MCPError, hooks.HookError, OSError, subprocess.CalledProcessError) as exc:
+        message = str(exc) if isinstance(exc, (Error, mcp.MCPError, hooks.HookError)) else type(exc).__name__
         print(f"super-apm: {message}", file=sys.stderr)
         return 1
 
