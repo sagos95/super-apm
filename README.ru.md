@@ -1,7 +1,7 @@
 # super-apm
 
-[![English](https://img.shields.io/badge/English-6E7681?style=for-the-badge)](README.md)
-[![Русский](https://img.shields.io/badge/%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-0969DA?style=for-the-badge)](README.ru.md)
+[![English](https://img.shields.io/badge/English-57606A?style=flat&logo=googletranslate&logoColor=white)](README.md)
+[![Русский](https://img.shields.io/badge/%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-0969DA?style=flat&logo=googletranslate&logoColor=white)](README.ru.md)
 
 Оболочка над [Microsoft APM](https://github.com/microsoft/apm) для общих и локальных скиллов и MCP-серверов в Claude Code и Codex.
 
