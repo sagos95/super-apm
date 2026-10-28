@@ -13,7 +13,7 @@ A wrapper for [Microsoft APM](https://github.com/microsoft/apm) to manage shared
 Requires Python 3.11+, Git, uv, and APM on your PATH. Tested with APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.2.1'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.3.0'
 ```
 
 ## Use

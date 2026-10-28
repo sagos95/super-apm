@@ -16,6 +16,7 @@ import time
 from super_apm_mcp import write_private
 
 HOOK_MARKER = "super-apm hook"
+BOOTSTRAP_MARKER = "super-apm bootstrap"
 STATE = "super-apm-hook.json"
 
 
@@ -69,7 +70,30 @@ def read_json(path: Path) -> dict:
 
 
 def is_managed(handler: dict) -> bool:
-    return any(isinstance(value := handler.get(field), str) and ("apm-hooks" in value or HOOK_MARKER in value) for field in ("command", "commandWindows"))
+    return any(isinstance(value := handler.get(field), str) and ("apm-hooks" in value or HOOK_MARKER in value or BOOTSTRAP_MARKER in value) for field in ("command", "commandWindows"))
+
+
+def bootstrap_commands(verb: str, arguments: str):
+    # Resolve the project at execution time, including when the client starts in a subdirectory.
+    shell = ("# super-apm bootstrap\n"
+             'R="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"\n'
+             'cd "$R" || exit 1\n'
+             'export PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"\n'
+             'if command -v super-apm >/dev/null 2>&1; then exec super-apm hook ' + verb + arguments + '; fi\n'
+             'for p in python3 python; do\n'
+             '  if command -v "$p" >/dev/null 2>&1 && "$p" -c "import sys;sys.exit(sys.version_info < (3,8))" 2>/dev/null; then exec "$p" .super-apm/bootstrap.py ' + verb + arguments + '; fi\n'
+             'done\n'
+             "printf '%s\\n' '" + json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart" if verb == "session-start" else "UserPromptSubmit", "additionalContext": "Package refresh is unavailable: super-apm and Python 3.8+ are missing. Ask the user to choose install or skip; if they explicitly choose install, set up uv, super-apm and Microsoft APM using official instructions, then run super-apm install. Otherwise continue without refresh. Do not install tools without consent."}}) + "'\n")
+    ps = ("# super-apm bootstrap\n"
+          "$r = $env:CLAUDE_PROJECT_DIR; if (-not $r) { $r = git rev-parse --show-toplevel 2>$null }; if ($r) { Set-Location $r }\n"
+          "$env:PATH = $env:PATH + [IO.Path]::PathSeparator + (Join-Path $HOME '.local/bin')\n"
+          "if (Get-Command super-apm -ErrorAction SilentlyContinue) { & super-apm hook " + verb + arguments + "; exit $LASTEXITCODE }\n"
+          "foreach ($p in @('python3','python','py')) { if (Get-Command $p -ErrorAction SilentlyContinue) { & $p -c 'import sys;sys.exit(sys.version_info < (3,8))' 2>$null; if ($LASTEXITCODE -eq 0) { & $p .super-apm/bootstrap.py " + verb + arguments + "; exit $LASTEXITCODE } } }\n"
+          "'" + json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart" if verb == "session-start" else "UserPromptSubmit", "additionalContext": "Package refresh is unavailable: super-apm and Python 3.8+ are missing. Ask for install or skip. Only after explicit install consent, install uv, super-apm and Microsoft APM using official instructions, then run super-apm install. Otherwise continue without refresh."}}) + "'\n")
+    import base64
+    windows = "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand " + base64.b64encode(ps.encode("utf-16-le")).decode()
+    polyglot = "echo `# <#` >/dev/null\n" + shell + "exit 0\n#> > $null\n" + ps
+    return shell, windows, polyglot
 
 
 def install(root: Path, policy: str, global_updates: bool, pre_shared: str | None = None):
@@ -94,15 +118,23 @@ def install(root: Path, policy: str, global_updates: bool, pre_shared: str | Non
                 handlers = [h for h in group.get("hooks", []) if not is_managed(h)]
                 if handlers:
                     kept.append({**group, "hooks": handlers})
-            command = f"super-apm hook {verb}" + (arguments if verb == "session-start" else "")
-            handler = {"type": "command", "command": command, "timeout": 20}
+            shell, windows, polyglot = bootstrap_commands(verb, arguments if verb == "session-start" else "")
+            handler = {"type": "command", "command": shell if relative.startswith(".codex/") else polyglot, "timeout": 20}
             if relative.startswith(".codex/"):
-                handler["commandWindows"] = command
+                handler["commandWindows"] = windows
             kept.append({"hooks": [handler]})
             hooks[event] = kept
         content = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
         if not path.exists() or path.read_text() != content:
             changes.append((path, content))
+    source = Path(__file__).with_name("super_apm_bootstrap.py").read_text()
+    bootstrap = root / ".super-apm/bootstrap.py"
+    if bootstrap.is_symlink() or bootstrap.parent.is_symlink():
+        raise HookError("Unsafe bootstrap path")
+    if bootstrap.exists() and not bootstrap.read_text().startswith('"""Dependency-free, vendorable hook gate;'):
+        raise HookError("The bootstrap destination contains a foreign file")
+    if not bootstrap.exists() or bootstrap.read_text() != source:
+        changes.append((bootstrap, source))
     app.update_ignore(root, list(app.receipt(root)))
     backup = root / app.LOCAL / "hook-backups" / str(time.time_ns())
     for path, content in changes:
@@ -226,27 +258,8 @@ def worker(args: list[str]) -> int:
 
 
 def prompt(root: Path) -> int:
-    if shutil.which("apm"):
-        return 0
-    try:
-        payload = json.loads(sys.stdin.read(65536) or "{}")
-    except ValueError:
-        payload = {}
-    session = str(payload.get("session_id", "default"))
-    marker = root / ".apm-local" / (".skip-" + hashlib.sha256(session.encode()).hexdigest()[:20])
-    if marker.exists():
-        return 0
-    value = str(payload.get("prompt", "")).strip().strip('.!«»"').strip().casefold()
-    if value in {"пропусти", "skip"}:
-        import super_apm as app
-        app.update_ignore(root, list(app.receipt(root)))
-        write_private(marker, "skip\n")
-        return 0
-    if value in {"ставь", "install", "install apm"}:
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "The user approved installing Microsoft APM. Install it using the official platform instructions, run super-apm install in this project, then ask to restart the agent session."}}))
-        return 0
-    print(json.dumps({"decision": "block", "reason": "APM is missing. Reply 'ставь' to install it, or 'пропусти' to continue without it for this session."}, ensure_ascii=False))
-    return 0
+    import super_apm_bootstrap as bootstrap
+    return bootstrap.prompt(root)
 
 
 def entry(root: Path, args: list[str]) -> int:
@@ -254,7 +267,8 @@ def entry(root: Path, args: list[str]) -> int:
         raise HookError("A hook event is required")
     if args[0] == "session-start":
         if not shutil.which("apm"):
-            print(json.dumps({"systemMessage": "APM is missing; package refresh is unavailable until it is installed."}))
+            import super_apm_bootstrap as bootstrap
+            bootstrap.emit_context("SessionStart", bootstrap.MISSING)
             return 0
         return schedule(root, args[1:])
     if args[0] == "prompt-submit":

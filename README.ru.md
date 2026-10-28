@@ -13,7 +13,7 @@
 Нужны Python 3.11+, Git, uv и APM на PATH. Проверено с APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.2.1'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.3.0'
 ```
 
 ## Использование

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "super-apm"
-version = "0.2.1"
+version = "0.3.0"
 description = "One CLI for shared and Git-ignored local APM skills"
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0,<7", "tomlkit>=0.13,<1"]
@@ -13,4 +13,4 @@ dependencies = ["PyYAML>=6.0,<7", "tomlkit>=0.13,<1"]
 super-apm = "super_apm:main"
 
 [tool.setuptools]
-py-modules = ["super_apm", "super_apm_mcp", "super_apm_hooks"]
+py-modules = ["super_apm", "super_apm_mcp", "super_apm_hooks", "super_apm_bootstrap", "super_apm_audit"]

@@ -28,6 +28,20 @@ Only entries recorded in local ownership receipts may be retired. Updates are no
 an atomic transaction across the two installations; a failed later step returns
 failure even when an earlier step completed. No Git commits or pushes are automatic.
 
+## Auditing nested worktrees
+
+Native APM 0.32 scans all of `.claude/`, including unrelated application files
+inside `.claude/worktrees/`. For explicit Claude/Codex targets, super-apm audits
+a private deployment snapshot when registered Git worktrees occur there. The
+snapshot retains the full governed client directories, manifests, lock, package
+sources, tracked-file index and Git origin used for policy discovery. Only actual
+registered nested checkouts are excluded; unrecorded files and arbitrary
+`node_modules` elsewhere remain in scope. Audit each nested checkout separately.
+No checks, hashes or findings are suppressed. The snapshot goes to Trash afterward.
+Local-path dependencies, file-based policy overrides and other targets fail with
+an instruction to use native audit rather than silently narrow their scope.
+`--file` stays native; `--strip` requires an explicit native invocation.
+
 ## Local MCP
 
 Local stdio and HTTP servers are exposed to Claude through `.mcp.json` and to Codex
@@ -63,7 +77,14 @@ super-apm hooks install --shared-policy daily --global-updates
 This replaces old `apm-hooks` or super-apm handlers in `.claude/settings.json` and
 `.codex/hooks.json`, preserving unrelated handlers and settings. Changed originals
 are backed up under ignored `.apm-local/hook-backups/`. Reinstalling is idempotent.
-The CLI must already be installed and available on the agent's PATH.
+A dependency-free gate is vendored at `.super-apm/bootstrap.py`; commit it with
+the hook configurations. It runs before super-apm is installed and offers an
+explicit install/skip choice for either missing tool. Installation instructions
+pin the wrapper release. No packages are downloaded until the user approves.
+The normal gate needs Python 3.8+ (standard library only); without Python, the
+launcher provides the same setup/skip instruction to the agent instead of a
+structured blocking gate. An installed wrapper does not need a system Python.
+The launcher also searches the standard uv and Homebrew executable directories.
 Approve the changed hooks in Codex and restart the client session to activate them.
 
 `SessionStart` launches a quiet background worker and returns immediately.
@@ -77,8 +98,7 @@ A project lock serializes refreshes and interactive mutations. Duplicate session
 starts do not launch overlapping workers. Global updates are opt-in and use a
 separate cross-project lock. Status, timestamps and a quiet log live in
 `.apm-local/`; `super-apm status` reports the last outcome. A failed refresh also
-produces one notification at the next session start. The prompt hook handles a
-missing native APM installation with an explicit install/skip choice.
+produces one notification at the next session start. The prompt hook handles either missing tool with an explicit install/skip choice.
 
 A background update can finish after the agent has discovered tools. Restart the
 session if it does not see newly added skills or MCP servers yet. Windows behavior

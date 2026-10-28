@@ -16,6 +16,7 @@ import yaml
 
 import super_apm_mcp as mcp
 import super_apm_hooks as hooks
+import super_apm_audit as audit
 import contextlib
 
 LOCAL = ".apm-local"
@@ -261,6 +262,8 @@ def native(root: Path, scope: str, args: list[str]) -> int:
         mcp.apply(root, mcp.prepare(root, expose=False), trash)
         detached = True
     try:
+        if scope == "shared" and args[0] == "audit":
+            return audit.run(cwd, executable, args, output)
         return subprocess.run([executable, *args], cwd=cwd, stdout=output, stderr=output).returncode
     finally:
         if detached:
@@ -380,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "mcp-run":
         return mcp.run_stdio(args[1:])
     if args == ["--version"]:
-        print("super-apm 0.2.1")
+        print("super-apm 0.3.0")
         return 0
     try:
         selected = [flag[2:] for flag in ("--local", "--shared") if flag in args]
@@ -482,8 +485,8 @@ def main(argv: list[str] | None = None) -> int:
                 if mutating and (root / LOCAL / "apm.yml").exists():
                     sync(root)
             return code
-    except (Error, mcp.MCPError, hooks.HookError, OSError, subprocess.CalledProcessError) as exc:
-        message = str(exc) if isinstance(exc, (Error, mcp.MCPError, hooks.HookError)) else type(exc).__name__
+    except (Error, mcp.MCPError, hooks.HookError, audit.AuditError, OSError, subprocess.CalledProcessError) as exc:
+        message = str(exc) if isinstance(exc, (Error, mcp.MCPError, hooks.HookError, audit.AuditError)) else type(exc).__name__
         print(f"super-apm: {message}", file=sys.stderr)
         return 1
 

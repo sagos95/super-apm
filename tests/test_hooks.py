@@ -39,7 +39,8 @@ class HookTests(unittest.TestCase):
         self.assertIn("--shared-policy pinned", result["hooks"]["SessionStart"][1]["hooks"][0]["command"])
         codex = json.loads((self.root / ".codex/hooks.json").read_text())
         handler = codex["hooks"]["SessionStart"][0]["hooks"][0]
-        self.assertEqual(handler["command"], handler["commandWindows"])
+        self.assertIn(".super-apm/bootstrap.py", handler["command"])
+        self.assertIn("-EncodedCommand", handler["commandWindows"])
 
     def test_reinstall_is_idempotent(self):
         hooks.install(self.root, "daily", True)
