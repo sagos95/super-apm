@@ -187,6 +187,16 @@ raise SystemExit(int(os.environ.get("FAKE_APM_EXIT", "0")))
         self.assertEqual(app.main(["install", "--dry-run"]), 0)
         self.assertFalse((self.root / ".gitignore").exists())
 
+    def test_dry_run_with_mcp_receipt_does_not_mutate_project(self):
+        self.manifest(); local = self.manifest(True)
+        (local / "super-apm-mcp.json").write_text(json.dumps({".mcp.json": {"created": True, "entries": {}}}))
+        target = self.root / ".mcp.json"; target.write_text('{"mcpServers":{}}')
+        before = target.read_bytes()
+        self.assertEqual(app.main(["install", "--dry-run"]), 0)
+        self.assertFalse((self.root / ".gitignore").exists())
+        self.assertFalse((self.root / ".super-apm-operation.lock").exists())
+        self.assertEqual(target.read_bytes(), before)
+
     def test_local_read_command_does_not_initialize_empty_scope(self):
         self.manifest()
         self.assertEqual(app.main(["audit", "--local"]), 1)

@@ -380,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "mcp-run":
         return mcp.run_stdio(args[1:])
     if args == ["--version"]:
-        print("super-apm 0.2.0")
+        print("super-apm 0.2.1")
         return 0
     try:
         selected = [flag[2:] for flag in ("--local", "--shared") if flag in args]
@@ -406,13 +406,16 @@ def main(argv: list[str] | None = None) -> int:
             if len(args) < 2 or args[1] != "install":
                 raise Error("Use hooks install --shared-policy daily|pinned")
             options = hooks.parse_policy(args[2:])
-            hooks.install(root, options.shared_policy, options.global_updates, options.pre_shared)
+            with hooks.operation_lock(root):
+                hooks.install(root, options.shared_policy, options.global_updates, options.pre_shared)
             return 0
         if command == "migrate-local":
-            migrate(root)
+            with hooks.operation_lock(root):
+                migrate(root)
             return 0
         if command == "sync":
-            sync(root)
+            with hooks.operation_lock(root):
+                sync(root)
             return 0
         if command == "status":
             print(f"shared: {root / 'apm.yml'}")
@@ -461,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
             scopes = ["shared"]
         if not scopes:
             raise Error("No APM manifest; use install PACKAGE or install PACKAGE --local")
-        lock = hooks.operation_lock(root) if mutating or mcp.state(root) else contextlib.nullcontext()
+        lock = hooks.operation_lock(root) if mutating or (mcp.state(root) and not dry_run) else contextlib.nullcontext()
         with lock:
             if mutating and (root / LOCAL / "apm.yml").exists():
                 sync(root, allow_shared_conflicts=command == "uninstall")

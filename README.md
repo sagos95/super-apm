@@ -9,7 +9,7 @@ super-apm coordinates two ordinary installations without importing APM internals
 Requires Python 3.11+, Git, and APM on PATH. Tested with APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.2.0'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.2.1'
 super-apm --help
 ```
 

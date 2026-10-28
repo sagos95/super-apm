@@ -147,5 +147,16 @@ class HookTests(unittest.TestCase):
         with hooks.operation_lock(self.root):
             self.assertEqual(subprocess.run(["git", "check-ignore", "-q", ".mcp.json"], cwd=self.root).returncode, 0)
 
+    @unittest.skipIf(os.name == "nt", "POSIX lock timing fixture")
+    def test_interactive_sync_waits_for_existing_worker_lock(self):
+        import sys
+        env = {**os.environ, "PYTHONPATH": str(Path(app.__file__).parent)}
+        with hooks.operation_lock(self.root):
+            process = subprocess.Popen([sys.executable, "-m", "super_apm", "sync"], cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            time.sleep(.3)
+            self.assertIsNone(process.poll(), "sync raced an active refresh")
+        stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stderr)
+
 
 if __name__ == "__main__": unittest.main()
