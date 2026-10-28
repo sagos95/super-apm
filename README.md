@@ -5,6 +5,16 @@
 
 A wrapper for [Microsoft APM](https://github.com/microsoft/apm) to manage shared and local skills and MCP servers in Claude Code and Codex.
 
+## Why use super-apm?
+
+Have a personal skill or MCP server you'd like to use in an APM (Agent Package Manager) project, but don't want it committed to Git or installed for everyone else on the project? Then Super-apm is for you!
+
+Normally, adding an AI tool to a project's APM dependencies means it will be installed automatically for everyone working on that project.
+
+Super-apm instead installs the tool (a skill or MCP server) just for you. Your agent can use it in the project, while the tool's files and your personal settings stay out of Git.
+
+Super-apm lets you install and update both team tools and your own additions with a single command.
+
 - **Shared:** the package list in `apm.yml`, stored in Git with your project.
 - **Local:** packages in `.apm-local/`, automatically excluded from Git along with their generated links and configuration.
 
