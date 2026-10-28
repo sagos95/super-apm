@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "super-apm"
+version = "0.1.0"
+description = "One CLI for shared and Git-ignored local APM skills"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0,<7"]
+
+[project.scripts]
+super-apm = "super_apm:main"
+
+[tool.setuptools]
+py-modules = ["super_apm"]

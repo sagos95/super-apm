@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.env
+.env.*
+.apm-local/
+apm_modules/
+.coverage
+.pytest_cache/
+.DS_Store
