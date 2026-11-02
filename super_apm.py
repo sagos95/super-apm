@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 import yaml
 
 import super_apm_mcp as mcp
+import super_apm_local_hooks as localhooks
 import super_apm_hooks as hooks
 import super_apm_audit as audit
 import contextlib
@@ -40,7 +41,7 @@ HELP = """super-apm — shared + local APM skills and MCP servers
   super-apm migrate-local            Move the legacy .git/apm-personal installation
 
 Use --shared or --local to select one scope. Native APM options are forwarded.
-Local scope supports Claude/Codex skills and project-local MCP servers. APM keeps separate manifests and lockfiles. No Git commit or push.
+Local scope supports Claude/Codex skills, project-local MCP servers and hooks. APM keeps separate manifests and lockfiles. No Git commit or push.
 """
 
 
@@ -92,7 +93,7 @@ def owned_link(path: Path, target: Path) -> bool:
 
 
 def update_ignore(root: Path, paths: list[str]) -> None:
-    paths = [*paths, *mcp.private_paths(root)]
+    paths = [*paths, *mcp.private_paths(root), *localhooks.private_paths(root)]
     path = root / ".gitignore"
     source = path.read_text() if path.exists() else ""
     if source.count(START) != source.count(END) or source.count(START) > 1:
@@ -136,12 +137,17 @@ def local_sources(root: Path) -> dict[str, Path]:
             if not source.resolve().is_relative_to(local.resolve()):
                 raise Error("A local source escapes its installation")
             result[f"{client}/skills/{source.name}"] = source
-    # Rendering these files locally would not activate them in the project.
-    for client in (".agents", ".claude", ".codex"):
+    # Rendering other files locally would not activate them in the project.
+    allowed = {
+        ".agents": {"skills"},
+        ".claude": {"skills", "settings.json", "hooks", "apm-hooks.json"},
+        ".codex": {"config.toml", "hooks.json", "hooks", "apm-hooks.json"},
+    }
+    for client, names in allowed.items():
         folder = local / client
         for item in folder.iterdir() if folder.is_dir() else []:
-            if item.name != "skills" and not (client == ".codex" and item.name == "config.toml"):
-                raise Error(f"Unsupported local APM output: {client}/{item.name}; only skills and MCP are exposed")
+            if item.name not in names:
+                raise Error(f"Unsupported local APM output: {client}/{item.name}; only skills, MCP and hooks are exposed")
     return result
 
 
@@ -191,7 +197,8 @@ def sync(root: Path, allow_shared_conflicts: bool = False) -> int:
             if name not in previous or not owned_link(path, root / previous[name]):
                 raise Error(f"An existing file or foreign link conflicts with local scope: {name}")
     mcp_plan = mcp.prepare(root)
-    update_ignore(root, sorted(desired) + mcp_plan[2])
+    hook_plan = localhooks.prepare(root)
+    update_ignore(root, sorted(desired) + mcp_plan[2] + hook_plan[2])
     for name, old_target in previous.items():
         path = root / name
         if name not in desired and path.is_symlink():
@@ -207,7 +214,9 @@ def sync(root: Path, allow_shared_conflicts: bool = False) -> int:
     if not path.exists() or path.read_text() != content:
         path.write_text(content)
     mcp_count = mcp.apply(root, mcp_plan, trash)
-    print(f"[super-apm] local: {len(desired)} skill links, {mcp_count} MCP entries reconciled", flush=True)
+    # MCP and hooks may share .codex/config.toml: plan hooks again on top of the MCP write.
+    hook_count = localhooks.apply(root, localhooks.prepare(root), trash)
+    print(f"[super-apm] local: {len(desired)} skill links, {mcp_count} MCP entries, {hook_count} hook groups reconciled", flush=True)
     return len(desired)
 
 
@@ -383,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "mcp-run":
         return mcp.run_stdio(args[1:])
     if args == ["--version"]:
-        print("super-apm 0.3.0")
+        print("super-apm 0.4.0")
         return 0
     try:
         selected = [flag[2:] for flag in ("--local", "--shared") if flag in args]
@@ -485,8 +494,8 @@ def main(argv: list[str] | None = None) -> int:
                 if mutating and (root / LOCAL / "apm.yml").exists():
                     sync(root)
             return code
-    except (Error, mcp.MCPError, hooks.HookError, audit.AuditError, OSError, subprocess.CalledProcessError) as exc:
-        message = str(exc) if isinstance(exc, (Error, mcp.MCPError, hooks.HookError, audit.AuditError)) else type(exc).__name__
+    except (Error, mcp.MCPError, hooks.HookError, localhooks.HookError, audit.AuditError, OSError, subprocess.CalledProcessError) as exc:
+        message = str(exc) if isinstance(exc, (Error, mcp.MCPError, hooks.HookError, localhooks.HookError, audit.AuditError)) else type(exc).__name__
         print(f"super-apm: {message}", file=sys.stderr)
         return 1
 

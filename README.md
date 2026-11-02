@@ -3,15 +3,15 @@
 [![English](https://img.shields.io/badge/English-0969DA?style=flat&logo=googletranslate&logoColor=white)](README.md)
 [![Русский](https://img.shields.io/badge/%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-57606A?style=flat&logo=googletranslate&logoColor=white)](README.ru.md)
 
-A wrapper for [Microsoft APM](https://github.com/microsoft/apm) to manage shared and local skills and MCP servers in Claude Code and Codex.
+A wrapper for [Microsoft APM](https://github.com/microsoft/apm) to manage shared and local skills, MCP servers and hooks in Claude Code and Codex.
 
 ## Why use super-apm?
 
-Have a personal skill or MCP server you'd like to use in an APM (Agent Package Manager) project, but don't want it committed to Git or installed for everyone else on the project? Then Super-apm is for you!
+Have a personal skill, MCP server or hook you'd like to use in an APM (Agent Package Manager) project, but don't want it committed to Git or installed for everyone else on the project? Then Super-apm is for you!
 
 Normally, adding an AI tool to a project's APM dependencies means it will be installed automatically for everyone working on that project.
 
-Super-apm instead installs the tool (a skill or MCP server) just for you. Your agent can use it in the project, while the tool's files and your personal settings stay out of Git.
+Super-apm instead installs the tool (a skill, MCP server or hook) just for you. Your agent can use it in the project, while the tool's files and your personal settings stay out of Git.
 
 Super-apm lets you install and update both team tools and your own additions with a single command.
 
@@ -23,7 +23,7 @@ Super-apm lets you install and update both team tools and your own additions wit
 Requires Python 3.11+, Git, uv, and APM on your PATH. Tested with APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.3.0'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.4.0'
 ```
 
 ## Use
@@ -53,7 +53,7 @@ Approve the changed hooks in Codex and restart your agent session.
 
 ## More
 
-[Advanced guide](docs/advanced.md): MCP setup, additional commands, recovery, and development. Local MCP requires Git-ignored project configuration files.
+[Advanced guide](docs/advanced.md): MCP and hook setup, additional commands, recovery, and development. Local MCP and hooks require Git-ignored project configuration files.
 
 To upgrade super-apm itself, repeat the install command with `--force` and the desired version tag.
 

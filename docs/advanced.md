@@ -64,6 +64,28 @@ and environment. Codex uses its native `cwd` setting. HTTP transport/auth fields
 remain native to each client. Project trust, MCP approval and OAuth login remain
 client responsibilities. Newly installed MCP servers may require a session restart.
 
+## Local hooks
+
+A local package may ship Claude Code and Codex hooks (`hooks/hooks.json` or per-client
+`hooks/claude-hooks.json` and `hooks/codex-hooks.json`). Native APM deploys them inside
+`.apm-local/` as if it were a separate project, so super-apm re-points every handler at
+the `.apm-local/` copy of its script and merges the groups into each client's ignored
+project settings:
+
+- Claude Code: `.claude/settings.local.json`. Handlers keep `${CLAUDE_PROJECT_DIR}` and
+  point at `.apm-local/.claude/hooks/`.
+- Codex: inline `[hooks]` tables in `.codex/config.toml`. Codex runs hook commands from
+  the session directory, which may be a subdirectory, so paths are anchored at
+  `$(git rev-parse --show-toplevel)/.apm-local/.codex/hooks/`.
+
+Prompt hooks and system commands pass through unchanged. Unrelated settings and
+foreign hook groups are retained; the receipt `.apm-local/super-apm-hooks.json` holds
+hashes of the groups super-apm added, so a changed or removed package replaces only
+its own groups. A settings file that super-apm created and that ends up empty goes to
+Trash. Both destinations must be **untracked**: super-apm refuses tracked files, adds
+ignore rules and writes them with owner-only permissions. Codex may ask to approve new
+hooks, and both clients read hooks at session start.
+
 ## Session hooks
 
 ```sh
@@ -106,14 +128,14 @@ is implemented, but native end-to-end validation has been performed on macOS.
 
 ## Boundaries and recovery
 
-Local skills and MCP for Claude/Codex are supported. Local LSP, executable exports
+Local skills, MCP and hooks for Claude/Codex are supported. Local LSP, executable exports
 and arbitrary client configuration merging are not. Global `-g` calls pass through
 to APM. A custom `--root` is rejected because it bypasses scope isolation.
 `install/update --dry-run` do not modify project files. Native uninstall lifecycle
 behavior is preserved, including pre-uninstall scripts during an upstream dry-run.
 
 Before a local uninstall, the previous local installation is preserved in system
-Trash. Stale owned links and empty owned MCP files also go to Trash. On macOS the
+Trash. Stale owned links and empty owned MCP and hook files also go to Trash. On macOS the
 system Trash is used; without an available Trash implementation, retirement fails
 instead of permanently deleting files. Trash is never emptied automatically.
 
