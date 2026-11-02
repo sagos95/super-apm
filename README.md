@@ -17,13 +17,14 @@ Super-apm lets you install and update both team tools and your own additions wit
 
 - **Shared:** the package list in `apm.yml`, stored in Git with your project.
 - **Local:** packages in `.apm-local/`, automatically excluded from Git along with their generated links and configuration.
+- **Upstream snapshots:** a folder that the whole project uses from Git, refreshed only on your machine from a private source. Where the source lives stays in `.apm-local/`, so collaborators see the folder but not where it comes from.
 
 ## Install
 
 Requires Python 3.11+, Git, uv, and APM on your PATH. Tested with APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.4.0'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.5.0'
 ```
 
 ## Use
@@ -40,6 +41,17 @@ super-apm status                         # check links and background refresh
 ```
 
 Add `--shared` or `--local` to work with just one scope. No Git commits or pushes happen automatically.
+
+## Share a tool from a private source
+
+Bring a skill you maintain elsewhere into the project, so every collaborator gets it from Git, while only you can refresh it:
+
+```sh
+super-apm upstream add .apm/skills/my-skill --source ~/path/to/private-repo --subpath skills/my-skill
+super-apm upstream sync    # copy the source's committed version into the snapshot
+```
+
+`--source` takes a local Git checkout or a Git URL. Only committed changes are copied. Commit the snapshot folder as usual; the source path, URL and sync state stay in the Git-ignored `.apm-local/`. With session hooks installed, your snapshots refresh before each background install. A snapshot edited in the project is never overwritten.
 
 ## Automatic updates
 

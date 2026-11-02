@@ -70,6 +70,16 @@ class HookTests(unittest.TestCase):
             hooks.worker(["--project", str(self.root)])
         self.assertEqual(calls, [("shared", ["install"]), ("local", ["install"])])
 
+    def test_upstream_snapshots_refresh_before_shared_install(self):
+        import super_apm_upstream as upstream
+        calls = []
+        (self.local / upstream.CONFIG).write_text("upstreams:\n- {path: .apm/skills/example, source: /nonexistent, subpath: skills/example}\n")
+        with patch.object(upstream, "sync", lambda root, trash: calls.append("upstream") or []), \
+                patch.object(app, "native", lambda root, scope, args: calls.append(scope) or 0), patch.object(app, "sync"):
+            self.assertEqual(hooks.worker(["--project", str(self.root)]), 0)
+        self.assertEqual(calls, ["upstream", "shared", "local"])
+        self.assertEqual(json.loads((self.local / hooks.STATE).read_text())["results"]["upstream"], 0)
+
     def test_shared_failure_does_not_prevent_independent_local_update(self):
         calls = []
         def native(root, scope, args): calls.append(scope); return 9 if scope == "shared" else 0

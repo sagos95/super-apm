@@ -86,6 +86,36 @@ Trash. Both destinations must be **untracked**: super-apm refuses tracked files,
 ignore rules and writes them with owner-only permissions. Codex may ask to approve new
 hooks, and both clients read hooks at session start.
 
+## Upstream snapshots
+
+An upstream snapshot is a tracked folder, for example `.apm/skills/<name>`, that every
+collaborator uses from Git and only its owner refreshes from a private source:
+
+```sh
+super-apm upstream add PATH --source SRC --subpath DIR [--ref REF]
+super-apm upstream sync [--dry-run]
+super-apm upstream list
+super-apm upstream remove PATH
+```
+
+`SRC` is a local Git checkout or a Git URL; a URL is kept as a private bare mirror in
+`.apm-local/upstream-cache/` and fetched on every sync. `REF` defaults to `HEAD`. Only
+the folder as committed at `REF` is copied, so uncommitted work in the source never
+reaches the project. Symlinks and submodules inside the folder are rejected.
+
+The configuration (`.apm-local/upstreams.yml`) and the last copied file hashes
+(`.apm-local/upstreams-state.json`) stay in the Git-ignored local installation. Nothing
+in tracked files names the source, and messages never print its location or Git
+output. `add` adopts an existing folder as the last synced version, so the next sync
+may replace it. A snapshot changed in the project since the last sync is reported and
+left alone; merge such edits into the upstream. Files that disappeared upstream go to
+Trash. An interrupted copy is resumed on the next sync instead of being mistaken for
+local edits.
+
+With session hooks installed, the background worker refreshes upstream snapshots before
+the shared install, so APM deploys the new version in the same run. Commit and push the
+snapshot like any other change. `--pre-shared` remains for project-specific steps.
+
 ## Session hooks
 
 ```sh

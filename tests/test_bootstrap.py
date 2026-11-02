@@ -36,7 +36,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(self.run_gate("представь пример")["decision"], "block")
         context = self.run_gate("ставь")["hookSpecificOutput"]["additionalContext"]
         self.assertIn("Microsoft APM", context)
-        self.assertIn("super-apm.git@v0.4.0", context)
+        self.assertIn("super-apm.git@v0.5.0", context)
 
     def test_skip_is_scoped_and_safe(self):
         self.run_gate("skip", "../../unsafe")
@@ -54,7 +54,7 @@ class BootstrapTests(unittest.TestCase):
         script = self.root / "bootstrap.py"; script.write_text(source)
         result = subprocess.run([sys.executable, "-I", str(script), "prompt-submit"], cwd=self.root, input='{"prompt":"install","session_id":"isolated"}', text=True, capture_output=True, env={**os.environ, "PATH": ""})
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("super-apm.git@v0.4.0", result.stdout)
+        self.assertIn("super-apm.git@v0.5.0", result.stdout)
 
     def test_installed_wrapper_receives_flags_and_stdin(self):
         with patch.object(bootstrap.shutil, "which", return_value="wrapper"), patch.object(bootstrap.subprocess, "run") as call:

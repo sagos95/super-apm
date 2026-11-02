@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 
-RELEASE = "v0.4.0"
+RELEASE = "v0.5.0"
 INSTALL = ("The user approved installing super-apm and Microsoft APM. "
            "Install any missing Microsoft APM using its official platform instructions. "
            "If uv is missing, install it using https://docs.astral.sh/uv/getting-started/installation/. "

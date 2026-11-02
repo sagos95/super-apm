@@ -214,6 +214,15 @@ def worker(args: list[str]) -> int:
     try:
         with operation_lock(root):
             now = time.time()
+            # Refresh owner-only snapshots first, so the shared install deploys the new version.
+            import super_apm_upstream as upstream
+            if upstream.load(root):
+                try:
+                    upstream.sync(root, app.trash)
+                    result["upstream"] = 0
+                except Exception as error:
+                    result["upstream"] = 1
+                    state["upstream_error_type"] = type(error).__name__
             for scope, directory in (("shared", root), ("local", local)):
                 if not (directory / "apm.yml").is_file():
                     continue

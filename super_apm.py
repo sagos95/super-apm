@@ -16,6 +16,7 @@ import yaml
 
 import super_apm_mcp as mcp
 import super_apm_local_hooks as localhooks
+import super_apm_upstream as upstream
 import super_apm_hooks as hooks
 import super_apm_audit as audit
 import contextlib
@@ -39,6 +40,11 @@ HELP = """super-apm — shared + local APM skills and MCP servers
       --global-updates              Also update global APM daily
       --pre-shared SCRIPT.py        Run a project script before shared install
   super-apm migrate-local            Move the legacy .git/apm-personal installation
+  super-apm upstream add PATH --source SRC --subpath DIR [--ref REF]
+                                     Keep tracked PATH as a snapshot of SRC:DIR; the source
+                                     is recorded only in Git-ignored .apm-local
+  super-apm upstream sync [--dry-run]  Refresh snapshots from their committed upstreams
+  super-apm upstream list|remove PATH  Show or forget upstreams (snapshots stay)
 
 Use --shared or --local to select one scope. Native APM options are forwarded.
 Local scope supports Claude/Codex skills, project-local MCP servers and hooks. APM keeps separate manifests and lockfiles. No Git commit or push.
@@ -350,6 +356,42 @@ def migrate(root: Path) -> None:
     print("[super-apm] moved legacy installation to .apm-local", flush=True)
 
 
+def upstream_command(root: Path, args: list[str]) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(prog="super-apm upstream")
+    parser.add_argument("action", choices=("add", "sync", "list", "remove"))
+    parser.add_argument("path", nargs="?")
+    parser.add_argument("--source")
+    parser.add_argument("--subpath")
+    parser.add_argument("--ref", default="HEAD")
+    parser.add_argument("--dry-run", action="store_true")
+    options = parser.parse_args(args)
+    if options.action == "list":
+        rows = upstream.describe(root)
+        print("\n".join(rows) if rows else "No upstreams; see super-apm upstream add")
+        return 0
+    if options.action in {"add", "remove"} and not options.path:
+        raise Error(f"upstream {options.action} needs the snapshot PATH")
+    if options.action == "add" and not (options.source and options.subpath):
+        raise Error("upstream add needs --source and --subpath")
+    with hooks.operation_lock(root):
+        local = root / LOCAL
+        if local.is_symlink() or tracked(root, local):
+            raise Error("The local installation must be an untracked real directory")
+        local.mkdir(exist_ok=True)
+        os.chmod(local, 0o700)
+        if options.action == "add":
+            upstream.add(root, options.path, options.source, options.subpath, options.ref)
+            print(f"[super-apm] upstream recorded for {options.path}; run super-apm upstream sync", flush=True)
+        elif options.action == "remove":
+            upstream.remove(root, options.path)
+            print(f"[super-apm] upstream forgotten for {options.path}; the snapshot stays", flush=True)
+        else:
+            changed = upstream.sync(root, trash, options.dry_run)
+            print(f"[super-apm] upstream: {len(changed)} snapshot(s) {'would change' if options.dry_run else 'refreshed'}", flush=True)
+    return 0
+
+
 def display_ref(value: str) -> str:
     if value.startswith(("https://", "http://", "ssh://")):
         parsed = urlsplit(value)
@@ -392,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "mcp-run":
         return mcp.run_stdio(args[1:])
     if args == ["--version"]:
-        print("super-apm 0.4.0")
+        print("super-apm 0.5.0")
         return 0
     try:
         selected = [flag[2:] for flag in ("--local", "--shared") if flag in args]
@@ -421,6 +463,8 @@ def main(argv: list[str] | None = None) -> int:
             with hooks.operation_lock(root):
                 hooks.install(root, options.shared_policy, options.global_updates, options.pre_shared)
             return 0
+        if command == "upstream":
+            return upstream_command(root, args[1:])
         if command == "migrate-local":
             with hooks.operation_lock(root):
                 migrate(root)
@@ -494,8 +538,8 @@ def main(argv: list[str] | None = None) -> int:
                 if mutating and (root / LOCAL / "apm.yml").exists():
                     sync(root)
             return code
-    except (Error, mcp.MCPError, hooks.HookError, localhooks.HookError, audit.AuditError, OSError, subprocess.CalledProcessError) as exc:
-        message = str(exc) if isinstance(exc, (Error, mcp.MCPError, hooks.HookError, localhooks.HookError, audit.AuditError)) else type(exc).__name__
+    except (Error, mcp.MCPError, hooks.HookError, localhooks.HookError, upstream.UpstreamError, audit.AuditError, OSError, subprocess.CalledProcessError) as exc:
+        message = str(exc) if isinstance(exc, (Error, mcp.MCPError, hooks.HookError, localhooks.HookError, upstream.UpstreamError, audit.AuditError)) else type(exc).__name__
         print(f"super-apm: {message}", file=sys.stderr)
         return 1
 
