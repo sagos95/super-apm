@@ -12,6 +12,7 @@ A package declares them in its own apm.yml under a key APM ignores:
           - path: ./vendor/local-method
           - {package: owner/repo/plugins/kit/skills/plan, as: kit/plan}
 
+Owners are the packages in a scope's lockfile and the project's own skills in .apm/skills/.
 Remote entries are resolved by `apm lock` in a private workspace: APM downloads them and
 writes a lockfile but deploys nothing into harness folders. Local entries are copied from
 the package itself. Files are renamed and written to the Git-ignored
@@ -191,6 +192,21 @@ def discover(root: Path) -> dict[str, dict]:
                 "spec": section["hidden"],
                 "names": {name.lower(), locked_identity(dependency), str(dependency.get("local_path", "")).lower()} - {""},
             }
+        # The project's own skills in .apm/skills/ are deployed by APM without a lock entry.
+        own = base / ".apm" / "skills"
+        for folder in sorted(own.iterdir()) if own.is_dir() and not own.is_symlink() else []:
+            if folder.is_symlink() or not (folder / "apm.yml").is_file():
+                continue
+            section = read_yaml(folder / "apm.yml").get(KEY)
+            if not isinstance(section, dict) or "hidden" not in section:
+                continue
+            name = folder.name
+            if not SEGMENT.fullmatch(name):
+                raise HiddenError(f"Unsafe package name for hidden dependencies: {name}")
+            if name in found:
+                raise HiddenError(f"Two installed packages named {name} declare hidden dependencies; keep one")
+            found[name] = {"scope": scope, "dir": folder, "base": folder.resolve(), "remote": False,
+                           "spec": section["hidden"], "names": {name.lower()}}
     return found
 
 

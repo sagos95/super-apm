@@ -25,7 +25,7 @@ Super-apm позволяет устанавливать и обновлять к
 Нужны Python 3.11+, Git, uv и APM на PATH. Проверено с APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.7.0'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.8.0'
 ```
 
 ## Использование

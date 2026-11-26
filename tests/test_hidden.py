@@ -187,6 +187,17 @@ class HiddenTests(unittest.TestCase):
         with self.assertRaises(hidden.HiddenError):
             hidden.parse("x", {**DECLARATION, "exclude": ["../secret"]})
 
+    def test_project_own_skill_declares_hidden_dependencies(self):
+        own = self.root / ".apm/skills/router"
+        (own / "vendor/notes").mkdir(parents=True)
+        (own / "vendor/notes/SKILL.md").write_text("---\nname: notes\n---\n")
+        (own / "SKILL.md").write_text("---\nname: router\n---\n")
+        declaration = {"destination": "methods", "dependencies": ["acme/skills/skills/animate#v1", {"path": "./vendor/notes", "as": "notes"}]}
+        (own / "apm.yml").write_text(yaml.safe_dump({"name": "router", "version": "1.0.0", "super-apm": {"hidden": declaration}}))
+        (self.root / "apm.yml").write_text(yaml.safe_dump({"name": "project", "dependencies": {"apm": []}}))
+        self.assertEqual(app.main(["install"]), 0, self.sink.getvalue())
+        self.assertEqual(self.output(), ["methods/animate/METHOD.md", "methods/animate/RECIPES.md", "methods/notes/METHOD.md"])
+
     def test_failed_global_apm_skips_hidden(self):
         home = self.base / "home/.apm"
         home.mkdir(parents=True)

@@ -128,7 +128,9 @@ A package declares hidden dependencies under `super-apm.hidden` in its own `apm.
 - `exclude`: file or folder patterns, relative to each dependency, that are not copied
   (`*.mp4`, `dist`, `.github`); shell wildcards match one path segment or the whole path.
 
-`<package>` is the installed package name, the same as its skill folder. An entry lands in
+`<package>` is the installed package name, the same as its skill folder. Besides packages in the
+lockfile, the project's own skills in `.apm/skills/<name>/` may declare hidden dependencies; local
+`path:` entries then resolve inside that folder. An entry lands in
 `.apm-hidden/<package>/<destination>/<as or skill name>/`. Unknown keys, unsafe names, `..` in
 `destination` or `as`, overlapping output folders, renames that collide and any file still
 named `SKILL.md` (in any letter case) stop reconciliation before files change.

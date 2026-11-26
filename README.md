@@ -25,7 +25,7 @@ Super-apm lets you install and update both team tools and your own additions wit
 Requires Python 3.11+, Git, uv, and APM on your PATH. Tested with APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.7.0'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.8.0'
 ```
 
 ## Use
