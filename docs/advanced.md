@@ -116,6 +116,43 @@ With session hooks installed, the background worker refreshes upstream snapshots
 the shared install, so APM deploys the new version in the same run. Commit and push the
 snapshot like any other change. `--pre-shared` remains for project-specific steps.
 
+## Hidden dependencies
+
+A package declares hidden dependencies under `super-apm.hidden` in its own `apm.yml`:
+
+- `dependencies` (required, non-empty): a string in any APM reference format;
+  `{git: URL, path: SUB, ref: REF}`, passed to APM as written; `{path: ./dir}` for a local
+  folder; or `{package: REF, as: NAME}` / `{path: ..., as: NAME}` to choose the output folder.
+- `destination`: a folder inside `.apm-hidden/<package>/`; empty by default.
+- `rename`: a file-name mapping applied at every depth; `{SKILL.md: METHOD.md}` by default.
+
+`<package>` is the installed package name, the same as its skill folder. An entry lands in
+`.apm-hidden/<package>/<destination>/<as or skill name>/`. Unknown keys, unsafe names, `..` in
+`destination` or `as`, overlapping output folders, renames that collide and any file still
+named `SKILL.md` (in any letter case) stop reconciliation before files change.
+
+Remote entries go into a generated manifest in `.apm-hidden/.super-apm/<package>/` and are
+resolved with `apm lock`, which downloads and pins them but deploys nothing. `install` reuses
+that lockfile and calls APM only when the declaration changed or a download is missing;
+`update` runs `apm lock --update`, and `update NAME` refreshes only the named packages. With
+`--shared-policy pinned`, hidden dependencies of shared packages keep their pins as well.
+Only direct entries are exposed; their own dependencies are downloaded but not copied.
+`super-apm hidden [--shared|--local]` reconciles on demand.
+
+Local entries are copied straight from the package, so they never lag behind it. For a package
+installed with `path:`, they resolve from its source folder and may name siblings (`../other`),
+like APM's own local paths. A remote package may only reference folders inside itself. Those
+folders also deploy with the package, so keep vendored `SKILL.md` files out of published
+packages. Symlinks inside dependencies are skipped and reported.
+
+Ownership works like local links. `.apm-hidden/.super-apm/state.json` records the hash of
+every file written. A file changed or added by hand stops reconciliation for that package and
+stays untouched, also when the package is removed; move it out and run `super-apm install`.
+A dependency dropped from the list goes to Trash as one folder; a removed package takes its
+output and workspace to Trash. An interrupted copy resumes on the next run. `.apm-hidden/`
+must stay untracked and joins the managed `.gitignore` block when first created. A package may
+not declare hidden dependencies in both scopes. `apm audit` does not cover them.
+
 ## Session hooks
 
 ```sh

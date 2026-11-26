@@ -18,13 +18,14 @@ Super-apm lets you install and update both team tools and your own additions wit
 - **Shared:** the package list in `apm.yml`, stored in Git with your project.
 - **Local:** packages in `.apm-local/`, automatically excluded from Git along with their generated links and configuration.
 - **Upstream snapshots:** a folder that the whole project uses from Git, refreshed only on your machine from a private source. Where the source lives stays in `.apm-local/`, so collaborators see the folder but not where it comes from.
+- **Hidden dependencies:** skills that a package needs but no agent may discover, kept in the Git-ignored `.apm-hidden/` under a different file name.
 
 ## Install
 
 Requires Python 3.11+, Git, uv, and APM on your PATH. Tested with APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.5.0'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.6.0'
 ```
 
 ## Use
@@ -53,13 +54,53 @@ super-apm upstream sync    # copy the source's committed version into the snapsh
 
 `--source` takes a local Git checkout or a Git URL. Only committed changes are copied. Commit the snapshot folder as usual; the source path, URL and sync state stay in the Git-ignored `.apm-local/`. With session hooks installed, your snapshots refresh before each background install. A snapshot edited in the project is never overwritten.
 
+## Hidden dependencies for router skills
+
+A router skill chooses one of many methods and reads only that one. Installed as skills, the methods would add dozens of descriptions to the agent's skill list, which Claude Code and Codex cap at 1–2% of the context window. Instead, the router declares them in its own `apm.yml`:
+
+```yaml
+name: ux-router
+version: 1.0.0
+super-apm:
+  hidden:
+    destination: references/methods            # folder inside .apm-hidden/ux-router/
+    rename: {SKILL.md: METHOD.md}              # the default; no file may stay SKILL.md
+    dependencies:
+      - emilkowalski/skills/skills/animate#64eb3de
+      - {package: owner/repo/plugins/ux-strategy/skills/frame-problem, as: ux-strategy/frame-problem}
+      - path: ../ux-check                      # relative to the package source
+```
+
+`super-apm install` places every method at `.apm-hidden/ux-router/references/methods/<name>/METHOD.md`; the rest of its folder stays as published. `update` and the daily session hooks refresh them together with ordinary packages, `list` shows their commits, `status` checks them, and uninstalling the router moves them to Trash. Entries use the usual APM formats, including private hosts and pinned `#ref`s; `as` picks the folder name, which defaults to the skill's own.
+
+The router finds its methods by walking up from its own folder:
+
+```python
+from pathlib import Path
+
+def hidden_dir(package: str) -> Path | None:
+    for folder in Path(__file__).resolve().parents:
+        if (folder / ".apm-hidden" / package).is_dir():
+            return folder / ".apm-hidden" / package
+    return None
+```
+
+Why it works this way:
+
+- **The list lives in the package's `apm.yml`.** APM 0.32 ignores the `super-apm` key, so the package keeps a single manifest and still installs with plain APM. The list is deliberately outside `dependencies.apm`, because APM would install those as visible skills.
+- **The files go to `.apm-hidden/`, not into the installed package.** APM rewrites `.claude/skills/<package>` on every `apm install` and deletes any file it did not put there.
+- **APM still downloads them.** super-apm runs `apm lock` in a private workspace: it resolves, downloads and pins packages without deploying anything into agent folders. The lockfile stays in `.apm-hidden/.super-apm/<package>/`.
+- **Nothing from the package runs.** super-apm only downloads, copies and renames files.
+
+Without super-apm, the router installs without its methods. The lock is per machine, so pin `#ref`s when every machine must get identical versions. [The advanced guide](docs/advanced.md#hidden-dependencies) lists the remaining rules.
+
 ## Automatic updates
 
 ```sh
 super-apm hooks install --shared-policy daily
 ```
 
-At the start of an agent session, packages refresh in the background once per day. Use `--shared-policy pinned` to keep shared versions fixed; local packages still update daily.
+At the start of an agent session, packages and their hidden dependencies refresh in the background once per day. Use `--shared-policy pinned` to keep shared versions fixed; local packages still update daily.
 
 Approve the changed hooks in Codex and restart your agent session.
 

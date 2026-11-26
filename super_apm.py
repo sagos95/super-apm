@@ -19,6 +19,7 @@ import super_apm_local_hooks as localhooks
 import super_apm_upstream as upstream
 import super_apm_hooks as hooks
 import super_apm_audit as audit
+import super_apm_hidden as hidden
 import contextlib
 
 LOCAL = ".apm-local"
@@ -34,6 +35,7 @@ HELP = """super-apm — shared + local APM skills and MCP servers
   super-apm list                     List shared and local dependencies
   super-apm audit                    Audit both installations
   super-apm sync                     Reconcile local skill links and .gitignore
+  super-apm hidden                   Materialize hidden dependencies declared by packages
   super-apm status                   Show scopes and local link health
   super-apm hooks install            Install Claude/Codex session hooks
       --shared-policy daily|pinned   Shared updates daily, or preserve pins
@@ -47,7 +49,8 @@ HELP = """super-apm — shared + local APM skills and MCP servers
   super-apm upstream list|remove PATH  Show or forget upstreams (snapshots stay)
 
 Use --shared or --local to select one scope. Native APM options are forwarded.
-Local scope supports Claude/Codex skills, project-local MCP servers and hooks. APM keeps separate manifests and lockfiles. No Git commit or push.
+Local scope supports Claude/Codex skills, project-local MCP servers and hooks. APM keeps separate manifests and lockfiles.
+Hidden dependencies follow install/update and land in the Git-ignored .apm-hidden/. No Git commit or push.
 """
 
 
@@ -99,7 +102,7 @@ def owned_link(path: Path, target: Path) -> bool:
 
 
 def update_ignore(root: Path, paths: list[str]) -> None:
-    paths = [*paths, *mcp.private_paths(root), *localhooks.private_paths(root)]
+    paths = [*paths, *mcp.private_paths(root), *localhooks.private_paths(root), *hidden.private_paths(root)]
     path = root / ".gitignore"
     source = path.read_text() if path.exists() else ""
     if source.count(START) != source.count(END) or source.count(START) > 1:
@@ -224,6 +227,18 @@ def sync(root: Path, allow_shared_conflicts: bool = False) -> int:
     hook_count = localhooks.apply(root, localhooks.prepare(root), trash)
     print(f"[super-apm] local: {len(desired)} skill links, {mcp_count} MCP entries, {hook_count} hook groups reconciled", flush=True)
     return len(desired)
+
+
+def reconcile_hidden(root: Path, scope: str, update: bool | set[str] = False) -> int:
+    """Materialize hidden dependencies declared by the scope's installed packages."""
+    if not hidden.relevant(root, scope):
+        return 0
+    folder = root / hidden.HIDDEN
+    if folder.is_symlink() or tracked(root, folder):
+        raise Error(f"{hidden.HIDDEN} must be an untracked real directory")
+    folder.mkdir(exist_ok=True)
+    update_ignore(root, list(receipt(root)))
+    return hidden.reconcile(root, scope, trash, update)
 
 
 def init_local(root: Path) -> None:
@@ -417,6 +432,7 @@ def list_packages(root: Path, scopes: list[str]) -> None:
                 ref = item if isinstance(item, str) else item.get("path", "")
                 if ref.split("#")[0].lower() not in seen:
                     rows.append([scope, display_ref(ref), "declared", "—"])
+    rows += hidden.rows(root, scopes)
     table = [["SCOPE", "PACKAGE", "STATE", "COMMIT"], *rows]
     widths = [max(len(row[index]) for row in table) for index in range(4)]
     for row in table:
@@ -434,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "mcp-run":
         return mcp.run_stdio(args[1:])
     if args == ["--version"]:
-        print("super-apm 0.5.0")
+        print("super-apm 0.6.0")
         return 0
     try:
         selected = [flag[2:] for flag in ("--local", "--shared") if flag in args]
@@ -473,16 +489,26 @@ def main(argv: list[str] | None = None) -> int:
             with hooks.operation_lock(root):
                 sync(root)
             return 0
+        if command == "hidden":
+            if len(args) != 1:
+                raise Error("Use hidden --shared/--local; install and update also refresh hidden dependencies")
+            with hooks.operation_lock(root):
+                for scope in selected or ["shared", "local"]:
+                    reconcile_hidden(root, scope)
+            return 0
         if command == "status":
             print(f"shared: {root / 'apm.yml'}")
             print(f"local: {root / LOCAL / 'apm.yml'}")
             desired = local_sources(root)
             healthy = sum(owned_link(root / name, path) and (root / name / "SKILL.md").is_file() for name, path in desired.items())
             print(f"local links: {healthy}/{len(desired)} healthy")
+            owners = hidden.health(root)
+            for name, count, ok in owners:
+                print(f"hidden {name}: {count} dependencies, {'healthy' if ok else 'needs super-apm install'}")
             hook_state = hooks.read_json(root / LOCAL / hooks.STATE)
             if hook_state:
                 print(f"background refresh: {hook_state.get('status', 'unknown')}")
-            return 0 if healthy == len(desired) else 1
+            return 0 if healthy == len(desired) and all(ok for _, _, ok in owners) else 1
         if command == "list":
             if len(args) != 1:
                 raise Error("Use list --local/--shared, or native 'deps list' options")
@@ -537,9 +563,12 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 if mutating and (root / LOCAL / "apm.yml").exists():
                     sync(root)
+                if mutating:
+                    refresh = command == "update" and (set(packages) if packages else True)
+                    reconcile_hidden(root, scope, refresh)
             return code
-    except (Error, mcp.MCPError, hooks.HookError, localhooks.HookError, upstream.UpstreamError, audit.AuditError, OSError, subprocess.CalledProcessError) as exc:
-        message = str(exc) if isinstance(exc, (Error, mcp.MCPError, hooks.HookError, localhooks.HookError, upstream.UpstreamError, audit.AuditError)) else type(exc).__name__
+    except (Error, mcp.MCPError, hooks.HookError, localhooks.HookError, upstream.UpstreamError, audit.AuditError, hidden.HiddenError, OSError, subprocess.CalledProcessError) as exc:
+        message = str(exc) if isinstance(exc, (Error, mcp.MCPError, hooks.HookError, localhooks.HookError, upstream.UpstreamError, audit.AuditError, hidden.HiddenError)) else type(exc).__name__
         print(f"super-apm: {message}", file=sys.stderr)
         return 1
 

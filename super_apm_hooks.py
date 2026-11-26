@@ -240,6 +240,8 @@ def worker(args: list[str]) -> int:
                         code = app.native(root, scope, call)
                     if not code and (local / "apm.yml").exists():
                         app.sync(root)
+                    if not code:
+                        app.reconcile_hidden(root, scope, command == "update")
                 except Exception as error:
                     code = 1
                     state[f"{scope}_error_type"] = type(error).__name__
