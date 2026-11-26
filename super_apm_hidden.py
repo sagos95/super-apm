@@ -6,6 +6,7 @@ A package declares them in its own apm.yml under a key APM ignores:
       hidden:
         destination: references/methods
         rename: {SKILL.md: METHOD.md}
+        exclude: ["*.mp4", dist]          # optional: files or folders not to copy
         dependencies:
           - owner/repo/skills/example#v1.2.0
           - path: ./vendor/local-method
@@ -18,6 +19,7 @@ the package itself. Files are renamed and written to the Git-ignored
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -142,16 +144,20 @@ def parse_entry(owner: str, item) -> dict:
 def parse(owner: str, value) -> dict:
     if not isinstance(value, dict):
         raise HiddenError(f"{owner}: 'super-apm.hidden' must be a mapping")
-    unknown = set(value) - {"destination", "rename", "dependencies"}
+    unknown = set(value) - {"destination", "rename", "exclude", "dependencies"}
     if unknown:
         raise HiddenError(f"{owner}: unknown hidden keys: {', '.join(sorted(map(str, unknown)))}")
     rename = value.get("rename", DEFAULT_RENAME)
     if not isinstance(rename, dict) or not all(isinstance(k, str) and isinstance(v, str) and SEGMENT.fullmatch(k) and SEGMENT.fullmatch(v) for k, v in rename.items()):
         raise HiddenError(f"{owner}: 'rename' maps file names to file names")
+    exclude = value.get("exclude", [])
+    if not isinstance(exclude, list) or not all(isinstance(p, str) and p.strip("/") and ".." not in p for p in exclude):
+        raise HiddenError(f"{owner}: 'exclude' lists relative file or folder patterns")
     entries = value.get("dependencies")
     if not isinstance(entries, list) or not entries:
         raise HiddenError(f"{owner}: hidden 'dependencies' must be a non-empty list")
     return {"destination": segments(value.get("destination", ""), "destination"), "rename": dict(rename),
+            "exclude": [p.strip("/") for p in exclude],
             "entries": [parse_entry(owner, item) for item in entries]}
 
 
@@ -319,6 +325,14 @@ def collect(source: Path) -> tuple[dict[str, Path], int]:
     return files, skipped
 
 
+def excluded(relative: str, patterns: list[str]) -> bool:
+    """A pattern names a file or folder relative to the dependency; shell wildcards allowed."""
+    parts = relative.split("/")
+    prefixes = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+    return any(fnmatch.fnmatchcase(prefix, pattern) or fnmatch.fnmatchcase(parts[i - 1], pattern)
+               for pattern in patterns for i, prefix in enumerate(prefixes, 1))
+
+
 def plan(owner: str, data: dict, root: Path, update: bool) -> tuple[dict[str, Path], list[str], list[dict]]:
     """Desired output files (relative to .apm-hidden/<owner>), unit folders and sources."""
     spec = parse(owner, data["spec"])
@@ -348,6 +362,8 @@ def plan(owner: str, data: dict, root: Path, update: bool) -> tuple[dict[str, Pa
         if skipped:
             print(f"[super-apm] hidden {owner}: skipped {skipped} symlink(s) in {name}", flush=True)
         for relative, path in files.items():
+            if excluded(relative, spec["exclude"]):
+                continue
             parts = relative.split("/")
             parts[-1] = spec["rename"].get(parts[-1], parts[-1])
             if parts[-1].lower() == "skill.md":

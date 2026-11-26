@@ -25,7 +25,7 @@ Super-apm lets you install and update both team tools and your own additions wit
 Requires Python 3.11+, Git, uv, and APM on your PATH. Tested with APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.6.0'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.7.0'
 ```
 
 ## Use
@@ -73,7 +73,7 @@ super-apm:
 
 `super-apm install` places every method at `.apm-hidden/ux-router/references/methods/<name>/METHOD.md`; the rest of its folder stays as published. `update` and the daily session hooks refresh them together with ordinary packages, `list` shows their commits, `status` checks them, and uninstalling the router moves them to Trash. Entries use the usual APM formats, including private hosts and pinned `#ref`s; `as` picks the folder name, which defaults to the skill's own.
 
-The router finds its methods by walking up from its own folder:
+The router finds its methods by walking up from its own folder; a global install (`super-apm install -g`) keeps them in `~/.apm/.apm-hidden/`:
 
 ```python
 from pathlib import Path
@@ -82,7 +82,8 @@ def hidden_dir(package: str) -> Path | None:
     for folder in Path(__file__).resolve().parents:
         if (folder / ".apm-hidden" / package).is_dir():
             return folder / ".apm-hidden" / package
-    return None
+    global_dir = Path.home() / ".apm" / ".apm-hidden" / package  # super-apm install -g
+    return global_dir if global_dir.is_dir() else None
 ```
 
 Why it works this way:

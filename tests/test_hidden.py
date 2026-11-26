@@ -154,6 +154,47 @@ class HiddenTests(unittest.TestCase):
         self.assertEqual(manifest["dependencies"]["apm"], ["acme/skills/skills/animate#v1", "acme/kit/plugins/strategy/skills/plan"])
         self.assertFalse((self.root / ".claude").exists())
 
+    def test_global_install_materializes_under_global_apm(self):
+        home = self.base / "home/.apm"
+        home.mkdir(parents=True)
+        self.owner(scope_base=home)
+        with patch.object(app, "global_root", lambda: home):
+            self.assertEqual(app.main(["install", "-g"]), 0, self.sink.getvalue())
+            folder = home / hidden.HIDDEN / "router"
+            self.assertTrue((folder / "references/methods/animate/METHOD.md").is_file())
+            self.assertTrue((folder / "references/methods/sibling/METHOD.md").is_file())
+            self.assertFalse((home / ".gitignore").exists())
+            self.assertFalse((self.root / hidden.HIDDEN).exists())
+            (folder / "references/methods/animate/METHOD.md").unlink()
+            self.assertEqual(app.main(["hidden", "-g"]), 0, self.sink.getvalue())
+            self.assertTrue((folder / "references/methods/animate/METHOD.md").is_file())
+            with patch.dict(os.environ, {"FAKE_COMMIT": "c2"}):
+                self.assertEqual(app.main(["update", "-g", "--yes"]), 0, self.sink.getvalue())
+        self.assertEqual(self.lock_calls(), [["lock"], ["lock", "--update"]])
+
+    def test_exclude_skips_files_and_folders(self):
+        self.remote("acme/skills/skills/animate", RECIPES="recipes")
+        (self.sources / "acme/skills/skills/animate/demo.mp4").write_text("video")
+        (self.sources / "acme/skills/skills/animate/dist").mkdir()
+        (self.sources / "acme/skills/skills/animate/dist/SKILL.md").write_text("nested")
+        self.owner({**DECLARATION, "exclude": ["*.mp4", "dist/"]})
+        self.assertEqual(app.main(["install"]), 0, self.sink.getvalue())
+        files = self.output()
+        self.assertIn("references/methods/animate/RECIPES.md", files)
+        self.assertFalse([f for f in files if f.endswith(".mp4") or "/dist/" in f])
+        self.assertEqual(hidden.excluded("a/b/c.txt", ["b"]), True)
+        self.assertEqual(hidden.excluded("ab/c.txt", ["b"]), False)
+        with self.assertRaises(hidden.HiddenError):
+            hidden.parse("x", {**DECLARATION, "exclude": ["../secret"]})
+
+    def test_failed_global_apm_skips_hidden(self):
+        home = self.base / "home/.apm"
+        home.mkdir(parents=True)
+        self.owner(scope_base=home)
+        with patch.object(app, "global_root", lambda: home), patch.dict(os.environ, {"FAKE_APM_EXIT": "3"}):
+            self.assertEqual(app.main(["install", "-g"]), 3)
+        self.assertFalse((home / hidden.HIDDEN).exists())
+
     def test_second_install_reuses_lock_and_update_refreshes_it(self):
         self.owner()
         app.main(["install"])

@@ -125,6 +125,8 @@ A package declares hidden dependencies under `super-apm.hidden` in its own `apm.
   folder; or `{package: REF, as: NAME}` / `{path: ..., as: NAME}` to choose the output folder.
 - `destination`: a folder inside `.apm-hidden/<package>/`; empty by default.
 - `rename`: a file-name mapping applied at every depth; `{SKILL.md: METHOD.md}` by default.
+- `exclude`: file or folder patterns, relative to each dependency, that are not copied
+  (`*.mp4`, `dist`, `.github`); shell wildcards match one path segment or the whole path.
 
 `<package>` is the installed package name, the same as its skill folder. An entry lands in
 `.apm-hidden/<package>/<destination>/<as or skill name>/`. Unknown keys, unsafe names, `..` in
@@ -138,6 +140,11 @@ that lockfile and calls APM only when the declaration changed or a download is m
 `--shared-policy pinned`, hidden dependencies of shared packages keep their pins as well.
 Only direct entries are exposed; their own dependencies are downloaded but not copied.
 `super-apm hidden [--shared|--local]` reconciles on demand.
+
+Global packages work the same way. After `super-apm install -g` or `update -g` succeeds,
+hidden dependencies of packages in `~/.apm/apm.yml` land in `~/.apm/.apm-hidden/<package>/`;
+`super-apm hidden -g` reconciles them on demand, and the session worker does so after its
+daily global update (`--global-updates`). No `.gitignore` is written there.
 
 Local entries are copied straight from the package, so they never lag behind it. For a package
 installed with `path:`, they resolve from its source folder and may name siblings (`../other`),
@@ -197,7 +204,7 @@ is implemented, but native end-to-end validation has been performed on macOS.
 
 Local skills, MCP and hooks for Claude/Codex are supported. Local LSP, executable exports
 and arbitrary client configuration merging are not. Global `-g` calls pass through
-to APM. A custom `--root` is rejected because it bypasses scope isolation.
+to APM, followed by hidden dependency reconciliation. A custom `--root` is rejected because it bypasses scope isolation.
 `install/update --dry-run` do not modify project files. Native uninstall lifecycle
 behavior is preserved, including pre-uninstall scripts during an upstream dry-run.
 

@@ -25,7 +25,7 @@ Super-apm позволяет устанавливать и обновлять к
 Нужны Python 3.11+, Git, uv и APM на PATH. Проверено с APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.6.0'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.7.0'
 ```
 
 ## Использование
@@ -73,7 +73,7 @@ super-apm:
 
 `super-apm install` кладёт каждый метод в `.apm-hidden/ux-router/references/methods/<имя>/METHOD.md`, остальные файлы папки остаются как в источнике. `update` и ежедневные хуки сессии обновляют методы вместе с обычными пакетами. `list` показывает их коммиты, `status` проверяет файлы, а при удалении роутера методы уходят в Корзину. Зависимости записываются в обычных форматах APM, включая приватные хосты и закреплённые `#ref`. Ключ `as` задаёт имя папки, по умолчанию берётся имя самого скилла.
 
-Роутер находит методы, поднимаясь вверх от своей папки:
+Роутер находит методы, поднимаясь вверх от своей папки; при глобальной установке (`super-apm install -g`) они лежат в `~/.apm/.apm-hidden/`:
 
 ```python
 from pathlib import Path
@@ -82,7 +82,8 @@ def hidden_dir(package: str) -> Path | None:
     for folder in Path(__file__).resolve().parents:
         if (folder / ".apm-hidden" / package).is_dir():
             return folder / ".apm-hidden" / package
-    return None
+    global_dir = Path.home() / ".apm" / ".apm-hidden" / package  # super-apm install -g
+    return global_dir if global_dir.is_dir() else None
 ```
 
 Почему устроено именно так:

@@ -255,6 +255,12 @@ def worker(args: list[str]) -> int:
                     if not stamp.exists() or time.time() - stamp.stat().st_mtime >= 86400:
                         executable = os.environ.get("SUPER_APM_EXECUTABLE") or shutil.which("apm")
                         code = subprocess.run([executable, "update", "-g", "--yes"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode if executable else 1
+                        if not code:
+                            try:
+                                app.reconcile_global(True)
+                            except Exception as error:
+                                code = 1
+                                state["global_error_type"] = type(error).__name__
                         result["global"] = code
                         if not code:
                             stamp.touch()

@@ -35,7 +35,7 @@ HELP = """super-apm — shared + local APM skills and MCP servers
   super-apm list                     List shared and local dependencies
   super-apm audit                    Audit both installations
   super-apm sync                     Reconcile local skill links and .gitignore
-  super-apm hidden                   Materialize hidden dependencies declared by packages
+  super-apm hidden [-g]              Materialize hidden dependencies declared by packages
   super-apm status                   Show scopes and local link health
   super-apm hooks install            Install Claude/Codex session hooks
       --shared-policy daily|pinned   Shared updates daily, or preserve pins
@@ -50,7 +50,8 @@ HELP = """super-apm — shared + local APM skills and MCP servers
 
 Use --shared or --local to select one scope. Native APM options are forwarded.
 Local scope supports Claude/Codex skills, project-local MCP servers and hooks. APM keeps separate manifests and lockfiles.
-Hidden dependencies follow install/update and land in the Git-ignored .apm-hidden/. No Git commit or push.
+Hidden dependencies follow install/update and land in the Git-ignored .apm-hidden/
+(~/.apm/.apm-hidden/ for -g). No Git commit or push.
 """
 
 
@@ -239,6 +240,23 @@ def reconcile_hidden(root: Path, scope: str, update: bool | set[str] = False) ->
     folder.mkdir(exist_ok=True)
     update_ignore(root, list(receipt(root)))
     return hidden.reconcile(root, scope, trash, update)
+
+
+def global_root() -> Path:
+    return Path.home() / ".apm"
+
+
+def reconcile_global(update: bool | set[str] = False) -> int:
+    """Materialize hidden dependencies of packages installed with global APM (~/.apm)."""
+    root = global_root()
+    if not (root / "apm.yml").is_file() or not hidden.relevant(root, "shared"):
+        return 0
+    folder = root / hidden.HIDDEN
+    if folder.is_symlink():
+        raise Error(f"{folder} must be a real directory")
+    folder.mkdir(exist_ok=True)
+    with hooks.file_lock(root / ".super-apm-hidden.lock"):
+        return hidden.reconcile(root, "shared", trash, update)
 
 
 def init_local(root: Path) -> None:
@@ -450,7 +468,7 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "mcp-run":
         return mcp.run_stdio(args[1:])
     if args == ["--version"]:
-        print("super-apm 0.6.0")
+        print("super-apm 0.7.0")
         return 0
     try:
         selected = [flag[2:] for flag in ("--local", "--shared") if flag in args]
@@ -464,10 +482,17 @@ def main(argv: list[str] | None = None) -> int:
         if "-g" in args or "--global" in args:
             if selected:
                 raise Error("Global APM cannot be combined with --local/--shared")
+            if args[0] == "hidden":
+                reconcile_global()
+                return 0
             executable = os.environ.get("SUPER_APM_EXECUTABLE") or shutil.which("apm")
             if not executable:
                 raise Error("APM is not installed")
-            return subprocess.run([executable, *args]).returncode
+            code = subprocess.run([executable, *args]).returncode
+            if not code and args[0] in {"install", "update", "uninstall"} and "--dry-run" not in args:
+                packages = package_args([a for a in args if a not in {"-g", "--global"}])
+                reconcile_global(args[0] == "update" and (set(packages) if packages else True))
+            return code
         root = project_root(Path.cwd())
         command = args[0]
         if command == "hook":
