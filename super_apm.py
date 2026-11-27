@@ -44,7 +44,7 @@ HELP = """super-apm — shared + local APM skills and MCP servers
   super-apm migrate-local            Move the legacy .git/apm-personal installation
   super-apm upstream add PATH --source SRC --subpath DIR [--ref REF]
                                      Keep tracked PATH as a snapshot of SRC:DIR; the source
-                                     is recorded only in Git-ignored .apm-local
+                                     is recorded only in .git/super-apm, shared by worktrees
   super-apm upstream sync [--dry-run]  Refresh snapshots from their committed upstreams
   super-apm upstream list|remove PATH  Show or forget upstreams (snapshots stay)
 
@@ -468,7 +468,7 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "mcp-run":
         return mcp.run_stdio(args[1:])
     if args == ["--version"]:
-        print("super-apm 0.8.0")
+        print("super-apm 0.9.0")
         return 0
     try:
         selected = [flag[2:] for flag in ("--local", "--shared") if flag in args]

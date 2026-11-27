@@ -99,12 +99,18 @@ super-apm upstream remove PATH
 ```
 
 `SRC` is a local Git checkout or a Git URL; a URL is kept as a private bare mirror in
-`.apm-local/upstream-cache/` and fetched on every sync. `REF` defaults to `HEAD`. Only
+`.git/super-apm/upstream-cache/` and fetched on every sync. `REF` defaults to `HEAD`. Only
 the folder as committed at `REF` is copied, so uncommitted work in the source never
 reaches the project. Symlinks and submodules inside the folder are rejected.
 
-The configuration (`.apm-local/upstreams.yml`) and the last copied file hashes
-(`.apm-local/upstreams-state.json`) stay in the Git-ignored local installation. Nothing
+The configuration (`upstreams.yml`) lives in `.git/super-apm/`, the Git common directory,
+so every worktree of the repository refreshes the same snapshots; a worktree's own
+`.apm-local/upstreams.yml` from an earlier version is merged there on the next run and
+kept as `upstreams.yml.migrated`. The last copied file hashes
+(`.apm-local/upstreams-state.json`) stay per worktree, because each checkout may hold
+another version of the snapshot. A worktree that has never synced adopts the snapshot
+as its branch committed it; uncommitted edits there are kept, and a branch without the
+snapshot folder is skipped rather than given one. Nothing
 in tracked files names the source, and messages never print its location or Git
 output. `add` adopts an existing folder as the last synced version, so the next sync
 may replace it. A snapshot changed in the project since the last sync is reported and

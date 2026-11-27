@@ -1,11 +1,12 @@
 """Shared snapshots that only their owner refreshes from a private upstream.
 
 A snapshot is a tracked folder in the project, for example .apm/skills/<name>, which every
-collaborator gets through Git. Where it comes from lives only in the Git-ignored .apm-local:
-upstreams.yml names the source (a local Git checkout or a Git URL), the folder inside it and
-the ref; upstreams-state.json remembers what was copied last. Only the committed state of the
-source is copied, so work in progress never reaches the project. Collaborators without the
-ignored files keep the snapshot as committed.
+collaborator gets through Git. Where it comes from lives only in the repository's Git directory
+(shared by all its worktrees, never tracked): upstreams.yml names the source (a local Git
+checkout or a Git URL), the folder inside it and the ref. Each worktree keeps its own
+upstreams-state.json in .apm-local, because its checkout may hold another version of the
+snapshot. Only the committed state of the source is copied, so work in progress never reaches
+the project. Collaborators without the configuration keep the snapshot as committed.
 """
 from __future__ import annotations
 
@@ -34,10 +35,19 @@ def local_dir(root: Path) -> Path:
     return root / ".apm-local"
 
 
-def load(root: Path) -> list[dict]:
-    path = local_dir(root) / CONFIG
-    if not path.exists():
-        return []
+def shared_dir(root: Path) -> Path:
+    """The Git common directory: one per repository, whichever worktree runs super-apm."""
+    call = subprocess.run(["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"], capture_output=True, text=True)
+    if call.returncode or not call.stdout.strip():
+        return local_dir(root)
+    return Path(call.stdout.strip()) / "super-apm"
+
+
+def config_path(root: Path) -> Path:
+    return shared_dir(root) / CONFIG
+
+
+def read_entries(path: Path) -> list[dict]:
     try:
         value = yaml.safe_load(path.read_text()) or {}
     except (OSError, yaml.YAMLError):
@@ -45,6 +55,33 @@ def load(root: Path) -> list[dict]:
     entries = value.get("upstreams", []) if isinstance(value, dict) else None
     if not isinstance(entries, list):
         raise UpstreamError("Invalid upstream configuration")
+    return entries
+
+
+def migrate(root: Path) -> None:
+    """Fold a worktree's own upstreams.yml (before 0.9) into the repository-wide one."""
+    legacy, path = local_dir(root) / CONFIG, config_path(root)
+    if not legacy.exists() or legacy == path:
+        return
+    entries = read_entries(path) if path.exists() else []
+    known = {entry.get("path"): entry for entry in entries if isinstance(entry, dict)}
+    for entry in read_entries(legacy):
+        current = known.get(entry.get("path")) if isinstance(entry, dict) else None
+        if current is None:
+            entries.append(entry)
+        elif current != entry:
+            raise UpstreamError(f"Two worktrees record different upstreams for {entry.get('path')}; remove one with super-apm upstream remove")
+    save_config(root, entries)
+    # Keep the old file for inspection; it is ignored and no longer read.
+    os.replace(legacy, legacy.with_name(CONFIG + ".migrated"))
+
+
+def load(root: Path) -> list[dict]:
+    migrate(root)
+    path = config_path(root)
+    if not path.exists():
+        return []
+    entries = read_entries(path)
     for entry in entries:
         if not isinstance(entry, dict) or not all(isinstance(entry.get(k), str) for k in ("path", "source", "subpath")):
             raise UpstreamError("Each upstream needs path, source and subpath")
@@ -55,7 +92,7 @@ def load(root: Path) -> list[dict]:
 
 
 def save_config(root: Path, entries: list[dict]) -> None:
-    write_private(local_dir(root) / CONFIG, yaml.safe_dump({"upstreams": entries}, sort_keys=False, allow_unicode=True))
+    write_private(config_path(root), yaml.safe_dump({"upstreams": entries}, sort_keys=False, allow_unicode=True))
 
 
 def read_state(root: Path) -> dict:
@@ -104,7 +141,7 @@ def repository(root: Path, entry: dict) -> tuple[Path, str]:
     if candidate.is_dir():
         return candidate, ref
     # A URL: keep a private bare mirror and refresh it on every sync.
-    mirror = local_dir(root) / CACHE / (hashlib.sha256(source.encode()).hexdigest()[:16] + ".git")
+    mirror = shared_dir(root) / CACHE / (hashlib.sha256(source.encode()).hexdigest()[:16] + ".git")
     if not mirror.exists():
         mirror.parent.mkdir(parents=True, exist_ok=True)
         call = subprocess.run(["git", "clone", "--bare", "--quiet", source, str(mirror)], capture_output=True)
@@ -151,6 +188,13 @@ def inventory(folder: Path) -> dict[str, str]:
     return dict(sorted(result.items()))
 
 
+def unchanged_in_git(root: Path, relative: str) -> bool:
+    """The worktree holds the snapshot exactly as its branch committed it."""
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "--error-unmatch", "--", relative], capture_output=True)
+    status = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all", "--", relative], capture_output=True)
+    return not tracked.returncode and not status.returncode and not status.stdout.strip()
+
+
 def ours(current: dict, *known) -> bool:
     """Every file matches a version written by super-apm: the last sync or an interrupted one."""
     return all(any(k and k.get(path) == checksum for k in known) for path, checksum in current.items())
@@ -191,9 +235,15 @@ def sync(root: Path, trash, dry_run: bool = False) -> list[str]:
     changed, failures = [], 0
     for entry in entries:
         path = entry["path"]
-        record = state.setdefault(path, {})
         try:
             folder = destination(root, path)
+            if path not in state:
+                # First sync in this worktree. A branch without the snapshot stays without it;
+                # a snapshot as committed on the branch is adopted, edits in progress are kept.
+                if not folder.exists():
+                    continue
+                state[path] = {"baseline": inventory(folder)} if unchanged_in_git(root, path) else {}
+            record = state[path]
             repo, ref = repository(root, entry)
             source = committed(repo, ref, entry["subpath"])
             if not source:

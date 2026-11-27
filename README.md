@@ -17,7 +17,7 @@ Super-apm lets you install and update both team tools and your own additions wit
 
 - **Shared:** the package list in `apm.yml`, stored in Git with your project.
 - **Local:** packages in `.apm-local/`, automatically excluded from Git along with their generated links and configuration.
-- **Upstream snapshots:** a folder that the whole project uses from Git, refreshed only on your machine from a private source. Where the source lives stays in `.apm-local/`, so collaborators see the folder but not where it comes from.
+- **Upstream snapshots:** a folder that the whole project uses from Git, refreshed only on your machine from a private source. Where the source lives stays in the repository's Git directory, so collaborators see the folder but not where it comes from.
 - **Hidden dependencies:** skills that a package needs but no agent may discover, kept in the Git-ignored `.apm-hidden/` under a different file name.
 
 ## Install
@@ -25,7 +25,7 @@ Super-apm lets you install and update both team tools and your own additions wit
 Requires Python 3.11+, Git, uv, and APM on your PATH. Tested with APM 0.32.0.
 
 ```sh
-uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.8.0'
+uv tool install 'git+https://github.com/sagos95/super-apm.git@v0.9.0'
 ```
 
 ## Use
@@ -52,7 +52,7 @@ super-apm upstream add .apm/skills/my-skill --source ~/path/to/private-repo --su
 super-apm upstream sync    # copy the source's committed version into the snapshot
 ```
 
-`--source` takes a local Git checkout or a Git URL. Only committed changes are copied. Commit the snapshot folder as usual; the source path, URL and sync state stay in the Git-ignored `.apm-local/`. With session hooks installed, your snapshots refresh before each background install. A snapshot edited in the project is never overwritten.
+`--source` takes a local Git checkout or a Git URL. Only committed changes are copied. Commit the snapshot folder as usual; the source path and URL stay in `.git/super-apm/`, shared by every worktree of the repository and never tracked, and each worktree keeps its sync state in the Git-ignored `.apm-local/`. With session hooks installed, your snapshots refresh before each background install. A snapshot edited in the project is never overwritten.
 
 ## Hidden dependencies for router skills
 

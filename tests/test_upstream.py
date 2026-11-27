@@ -101,12 +101,12 @@ class UpstreamTests(unittest.TestCase):
         self.commit_source({"SKILL.md": "v2\n"})
         self.sync()
         self.assertEqual(self.snapshot(), "v2\n")
-        self.assertTrue(any((self.root / ".apm-local" / upstream.CACHE).iterdir()))
+        self.assertTrue(any((self.root / ".git/super-apm" / upstream.CACHE).iterdir()))
 
     def test_source_is_kept_out_of_tracked_files(self):
         self.add()
         self.sync()
-        config = (self.root / ".apm-local" / upstream.CONFIG).read_text()
+        config = (self.root / ".git/super-apm" / upstream.CONFIG).read_text()
         self.assertIn(str(self.source), config)
         for path in (self.root / ".apm").rglob("*"):
             if path.is_file():
@@ -126,6 +126,72 @@ class UpstreamTests(unittest.TestCase):
         with contextlib.redirect_stdout(output), self.assertRaises(upstream.UpstreamError):
             upstream.sync(self.root, self.retire)
         self.assertNotIn("missing.git", output.getvalue())
+
+    def worktree(self, name="second"):
+        (self.root / ".gitignore").write_text("/.apm-local/\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "snapshot")
+        other = self.root.parent / name
+        git(self.root, "worktree", "add", "-q", "--detach", str(other))
+        return other
+
+    def sync_in(self, root):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return upstream.sync(root, self.retire)
+
+    def test_every_worktree_of_the_repository_sees_the_upstream(self):
+        self.add()
+        self.sync()
+        other = self.worktree()
+        self.assertEqual(upstream.load(other), upstream.load(self.root))
+        self.commit_source({"SKILL.md": "v2\n"})
+        self.assertEqual(self.sync_in(other), [SNAPSHOT])
+        self.assertEqual((other / SNAPSHOT / "SKILL.md").read_text(), "v2\n")
+        self.assertEqual(self.snapshot(), "v1\n")
+
+    def test_new_worktree_keeps_uncommitted_snapshot_edits(self):
+        self.add()
+        self.sync()
+        other = self.worktree()
+        (other / SNAPSHOT / "SKILL.md").write_text("edited in the second worktree\n")
+        self.commit_source({"SKILL.md": "v2\n"})
+        self.assertEqual(self.sync_in(other), [])
+        self.assertEqual((other / SNAPSHOT / "SKILL.md").read_text(), "edited in the second worktree\n")
+
+    def test_branch_without_the_snapshot_stays_without_it(self):
+        (self.root / "README.md").write_text("project\n")
+        git(self.root, "add", "README.md")
+        git(self.root, "commit", "-q", "-m", "before the snapshot")
+        older = self.root.parent / "older"
+        git(self.root, "worktree", "add", "-q", "--detach", str(older))
+        self.add()
+        self.sync()
+        self.assertEqual(self.sync_in(older), [])
+        self.assertFalse((older / SNAPSHOT).exists())
+
+    def test_worktree_configuration_moves_to_the_repository(self):
+        legacy = self.root / ".apm-local" / upstream.CONFIG
+        legacy.write_text(f"upstreams:\n- path: {SNAPSHOT}\n  source: {self.source}\n  subpath: skills/example\n")
+        self.assertEqual([e["path"] for e in upstream.load(self.root)], [SNAPSHOT])
+        self.assertFalse(legacy.exists())
+        self.assertTrue(legacy.with_name(upstream.CONFIG + ".migrated").exists())
+        self.assertTrue((self.root / ".git/super-apm" / upstream.CONFIG).exists())
+
+    def test_migration_merges_worktrees_and_rejects_conflicts(self):
+        self.add()
+        other = self.worktree()
+        self.assertFalse((other / ".apm-local").exists())
+        (other / ".apm-local").mkdir()
+        legacy = other / ".apm-local" / upstream.CONFIG
+        legacy.write_text(f"upstreams:\n- path: .apm/skills/another\n  source: {self.source}\n  subpath: skills/example\n")
+        self.assertEqual({e["path"] for e in upstream.load(self.root)}, {SNAPSHOT})
+        self.assertEqual({e["path"] for e in upstream.load(other)}, {SNAPSHOT, ".apm/skills/another"})
+        third = self.root.parent / "third"
+        git(self.root, "worktree", "add", "-q", "--detach", str(third))
+        (third / ".apm-local").mkdir()
+        (third / ".apm-local" / upstream.CONFIG).write_text(f"upstreams:\n- path: {SNAPSHOT}\n  source: /elsewhere\n  subpath: skills/example\n")
+        with self.assertRaises(upstream.UpstreamError):
+            upstream.load(third)
 
     def test_cli_add_sync_list_remove(self):
         cwd = Path.cwd()
